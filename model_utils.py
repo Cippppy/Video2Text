@@ -16,6 +16,7 @@ from ultralytics import YOLO
 import numpy as np
 from sklearn.cluster import KMeans
 from transformers import pipeline
+from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
 # ------------------------------------------------------------------------------------- #
 # Functions
@@ -49,7 +50,7 @@ def extract_frame_features(frame):
     # Normalize the histogram and flatten it into a feature vector
     return cv2.normalize(hist, hist).flatten()
 
-def extract_keyframes_with_kmeans(model, video_path, output_folder, num_clusters=5, threshold=0.5):
+def extract_keyframes_with_kmeans(model, video_path, output_folder, num_clusters=5, threshold=0.5, device="cuda:0"):
     """
     Extracts keyframes from a video using YOLO object detection and K-means clustering.
 
@@ -87,7 +88,7 @@ def extract_keyframes_with_kmeans(model, video_path, output_folder, num_clusters
             break
 
         # Run YOLO on the frame
-        results = model.track(frame, persist=True, tracker="bytetrack.yaml")
+        results = model.track(frame, persist=True, device=device, verbose=False, tracker="bytetrack.yaml")
         if len(results[0].boxes.xywh.cpu()) > 0:
             feature_vector = extract_frame_features(frame)
             frame_features.append(feature_vector)
@@ -117,11 +118,11 @@ def extract_keyframes_with_kmeans(model, video_path, output_folder, num_clusters
 
     return keyframe_paths  # Return list of keyframe paths
 
-def generate_caption(frame, model="Salesforce/blip-image-captioning-base"):
+def generate_caption(frame, model="Salesforce/blip-image-captioning-base", device=0):
     """Generate"""
-    captioner = pipeline("image-to-text", model=model)
+    captioner = pipeline("image-to-text", model=model, device=device, max_new_tokens=100)
     caption = captioner(frame)
-    return caption
+    return caption[0]['generated_text']
 
 def generate_summary(model, tokenizer, prompt):
     """Generate a text summary based on the given prompt."""
@@ -135,11 +136,16 @@ def generate_summary(model, tokenizer, prompt):
 
 if __name__ == "__main__":
     # Example usage
-    model = YOLO('yolov8n.pt')  # Load an official Detect model
+    det_model = YOLO('yolov8n.pt')  # Load an official Detect model
+    # Load GPT-2 model and tokenizer
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    model = GPT2LMHeadModel.from_pretrained('gpt2')
     video_path = 'videos/Saint.mp4'
-    keyframes = extract_keyframes_with_kmeans(model, video_path, 'frames/', num_clusters=5)
+    keyframes = extract_keyframes_with_kmeans(det_model, video_path, 'frames/', num_clusters=5)
     
     captions = []
     for keyframe in keyframes:
         captions.append(generate_caption(keyframe))
     print(captions)
+    summary = generate_summary(model, tokenizer, str(captions))
+    print(summary)
